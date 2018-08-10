@@ -10,6 +10,9 @@ import math
 import pickle
 import os
 
+global my_cider_dicts                
+my_cider_dicts = {}
+
 def precook(s, n=4, out=False):
     """
     Takes a string as input and returns an object that can be given to
@@ -57,23 +60,15 @@ class CiderScorer(object):
         new.crefs = copy.copy(self.crefs)
         return new
 
-    def __init__(self, df_mode="corpus", test=None, refs=None, n=4, sigma=6.0):
+    def __init__(self, test=None, refs=None, n=4, sigma=6.0):
         ''' singular instance '''
         self.n = n
         self.sigma = sigma
         self.crefs = []
         self.ctest = []
-        self.df_mode = df_mode
-        self.ref_len = None
-        if self.df_mode != "corpus":
-            pkl_file = pickle.load(open(os.path.join('data', df_mode + '.p'),'r'))
-            self.ref_len = np.log(float(pkl_file['ref_len']))
-            self.document_frequency = pkl_file['document_frequency']
+        self.document_frequency = defaultdict(float)
         self.cook_append(test, refs)
-    
-    def clear(self):
-        self.crefs = []
-        self.ctest = []
+        self.ref_len = None
 
     def cook_append(self, test, refs):
         '''called by constructor and __iadd__ to avoid creating new instances.'''
@@ -84,6 +79,10 @@ class CiderScorer(object):
                 self.ctest.append(cook_test(test)) ## N.B.: -1
             else:
                 self.ctest.append(None) # lens of crefs and ctest have to match
+
+    def clear(self):
+        self.crefs = []
+        self.ctest = []
 
     def size(self):
         assert len(self.crefs) == len(self.ctest), "refs/test mismatch! %d<>%d" % (len(self.crefs), len(self.ctest))
@@ -113,7 +112,7 @@ class CiderScorer(object):
                 self.document_frequency[ngram] += 1
             # maxcounts[ngram] = max(maxcounts.get(ngram,0), count)
 
-    def compute_cider(self):
+    def compute_cider(self, df_mode):
         def counts2vec(cnts):
             """
             Function maps counts of ngram to vector of tfidf weights.
@@ -127,11 +126,12 @@ class CiderScorer(object):
             norm = [0.0 for _ in range(self.n)]
             for (ngram,term_freq) in cnts.iteritems():
                 # give word count 1 if it doesn't appear in reference corpus
-                df = np.log(max(1.0, self.document_frequency[ngram]))
+                df = np.log(max(1.0, self.document_frequency['document_frequency'][ngram]))
                 # ngram index
                 n = len(ngram)-1
                 # tf (term_freq) * idf (precomputed idf) for n-grams
-                vec[n][ngram] = float(term_freq)*(self.ref_len - df)
+                #vec[n][ngram] = float(term_freq)*(self.ref_len - df) #This didn't work for me!
+                vec[n][ngram] = float(term_freq)*(self.document_frequency['ref_len'] - df)
                 # compute norm for the vector.  the norm will be used for computing similarity
                 norm[n] += pow(vec[n][ngram], 2)
 
@@ -169,11 +169,11 @@ class CiderScorer(object):
             return val
 
         # compute log reference length
-        if self.df_mode == "corpus":
+        if df_mode == "corpus":
             self.ref_len = np.log(float(len(self.crefs)))
-        #elif self.df_mode == "coco-val":
+        elif df_mode == "coco-val-df":
             # if coco option selected, use length of coco-val set
-        #    self.ref_len = np.log(float(40504))
+            self.ref_len = np.log(float(40504))
 
         scores = []
         for test, refs in zip(self.ctest, self.crefs):
@@ -194,16 +194,20 @@ class CiderScorer(object):
             scores.append(score_avg)
         return scores
 
-    def compute_score(self, option=None, verbose=0):
+    def compute_score(self, df_mode, option=None, verbose=0):
         # compute idf
-        if self.df_mode == "corpus":
-            self.document_frequency = defaultdict(float)
+        if df_mode == "corpus":
             self.compute_doc_freq()
             # assert to check document frequency
             assert(len(self.ctest) >= max(self.document_frequency.values()))
             # import json for now and write the corresponding files
+        else:
+            if len(my_cider_dicts.keys()) == 0:
+                my_cider_dicts[df_mode] = pickle.load(open(os.path.join('/data2/jspark/coco-crit', df_mode + '.p'),'r'))                
+            self.document_frequency = my_cider_dicts[df_mode]
+                #self.document_frequency = pickle.load(open(os.path.join('data', df_mode + '.p'),'r'))
         # compute cider score
-        score = self.compute_cider()
+        score = self.compute_cider(df_mode)
         # debug
         # print score
         return np.mean(np.array(score)), np.array(score)

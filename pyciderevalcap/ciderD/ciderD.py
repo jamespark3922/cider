@@ -22,7 +22,7 @@ class CiderD:
         self._sigma = sigma
         # set which where to compute document frequencies from
         self._df = df
-        self.cider_scorer = CiderScorer(n=self._n, df_mode=self._df)
+        self.cider_scorer = CiderScorer(n=self._n)
 
     def compute_score(self, gts, res):
         """
@@ -46,7 +46,7 @@ class CiderD:
             assert(len(ref) > 0)
             self.cider_scorer += (hypo[0], ref)
 
-        (score, scores) = self.cider_scorer.compute_score()
+        (score, scores) = self.cider_scorer.compute_score(df_mode=self._df)
 
         return score, scores
 
